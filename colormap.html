@@ -1,0 +1,550 @@
+{{/*
+  Colormaps for Micro.blog (Hugo Shortcode)
+  =========================================
+  CSS and JS are emitted only once per page regardless of how many
+  colormap shortcodes appear. Bundled SVG maps are loaded from
+  assets/colormaps/ at build time — only the requested map is read
+  per invocation. Add-on maps go in the same directory.
+  Supports multiple independent maps on a single page.
+
+  Usage:
+    {{< colormap >}}
+    {{< colormap data="road-trips" >}}
+    {{< colormap data="national-parks" color="#8B5E3C" >}}
+    {{< colormap data="colormap" legend="colormap-legend" >}}
+
+  Parameters:
+    map        — which SVG map to render (default: "us-states")
+                 Bundled maps (in assets/colormaps/):
+                   us-states, us-territories, canada, australia-states,
+                   europe, europe-eu, europe-schengen, europe-detail,
+                   north-america, south-america, central-america,
+                   caribbean, caribbean-all, caribbean-territories,
+                   africa, asia, oceania, world
+                 Add-on maps (place SVG at assets/colormaps/[name].svg):
+                   canada-detailed, france-regions
+                   — or any custom SVG following the path/class conventions
+    data       — data file name in data/colormaps/ without extension (default: "colormap")
+                 Place your file at data/colormaps/colormap.yaml
+    color      — default fill color for visited regions (default: "#4a7c59")
+                 Per-region color fields in the YAML override this.
+    emptycolor — fill color for unvisited/empty regions (optional)
+                 Applies to both the SVG map shapes and the grid tiles.
+    legend     — legend file name in data/colormaps/ without extension (optional)
+                 Place your file at data/colormaps/colormap-legend.yaml
+                 Legend tiles appear inline at the start of the tile grid.
+    progress   — set to "yes" to show a progress tile at the end of the grid
+                 Displays visited count, total, and percentage. E.g. "14 / 50 · 28%"
+                 Only regions whose keys exist on the chosen map are counted.
+    grid       — set to "no" to hide the tile grid and popup entirely
+                 Only the SVG map is rendered. Visited regions are still colored.
+                 Legend, progress, and click interactions are unavailable in this mode.
+    tiles      — set to "name" to display full region names on tiles instead of key abbreviations.
+                 Tiles auto-width to fit the text, like legend tiles.
+                 Useful for maps with few regions (continents) or unfamiliar abbreviations.
+
+  Data file format (data/colormaps/colormap.yaml):
+    - key: or
+      note: Drove the coast in 2019.
+      url: https://myblog.com/posts/oregon
+    - key: mt
+      color: "#c0612b"
+      note: Glacier NP.
+    - key: gb               # add-on / custom map example
+      name: United Kingdom  # overrides built-in lookup or uppercased key fallback
+      note: London and the Cotswolds.
+
+  Fields: key (required), note, url, color, name (all optional, single-line values).
+
+  Legend file format (data/colormaps/colormap-legend.yaml):
+    - label: Visited
+      color: "#4a7c59"
+      note: Places I've spent meaningful time.
+      url: /travel
+    - label: Lived there
+      color: "#c0612b"
+      note: Called it home for at least a year.
+
+  Add-on SVG requirements (for custom maps placed in assets/colormaps/):
+    - Every colorable region must be a <path> with a lowercase CSS class matching its key
+    - All region paths inside a <g class="state"> wrapper
+    - Border/separator paths must have fill="none" on their group
+    - No <clipPath> elements
+    - A viewBox attribute on the <svg> root
+*/}}
+
+{{/* ── Parameters ── */}}
+{{- $mapName      := .Get "map"   | default "us-states" -}}
+{{- $dataName     := .Get "data"  | default "colormap" -}}
+{{- $defaultColor := .Get "color" | default "#4a7c59" -}}
+{{- $emptyColor   := .Get "emptycolor" | default "" -}}
+{{- $legendName   := .Get "legend" | default "" -}}
+{{- $showStats    := eq (.Get "progress") "yes" -}}
+{{- $showGrid     := ne (.Get "grid") "no" -}}
+{{- $tilesName    := eq (.Get "tiles") "name" -}}
+
+{{/* ── Unique ID for this instance on this page ── */}}
+{{- if not (.Page.Scratch.Get "colormapCount") -}}{{- .Page.Scratch.Set "colormapCount" 0 -}}{{- end -}}
+{{- $n := .Page.Scratch.Get "colormapCount" -}}
+{{- .Page.Scratch.Set "colormapCount" (add $n 1) -}}
+{{- $id := printf "colormap-%d" $n -}}
+
+{{/* ── Load region data ── */}}
+{{- $mapData := index .Site.Data "colormaps" $dataName -}}
+
+{{/* ── Load legend data (optional) ── */}}
+{{- $legendData := slice -}}
+{{- if $legendName -}}
+  {{- $legendKey := replace $legendName "-" "_" -}}
+  {{- $legendData = index .Site.Data "colormaps" $legendKey | default slice -}}
+  {{- if not $legendData -}}
+    {{- $legendData = index .Site.Data "colormaps" $legendName | default slice -}}
+  {{- end -}}
+{{- end -}}
+
+{{/* ── Build region lookup: key → entry ── */}}
+{{- $regionMap := dict -}}
+{{- if $mapData -}}
+  {{- range $mapData -}}
+    {{- $regionMap = merge $regionMap (dict (printf "%v" .key) .) -}}
+  {{- end -}}
+{{- end -}}
+
+{{/* ── US States: ordered key list and full names ── */}}
+{{- $usKeys := slice "ak" "al" "ar" "az" "ca" "co" "ct" "de" "fl" "ga" "hi" "ia" "id" "il" "in" "ks" "ky" "la" "ma" "md" "me" "mi" "mn" "mo" "ms" "mt" "nc" "nd" "ne" "nh" "nj" "nm" "nv" "ny" "oh" "ok" "or" "pa" "ri" "sc" "sd" "tn" "tx" "ut" "va" "vt" "wa" "wi" "wv" "wy" -}}
+{{- $usNames := dict "ak" "Alaska" "al" "Alabama" "ar" "Arkansas" "az" "Arizona" "ca" "California" "co" "Colorado" "ct" "Connecticut" "de" "Delaware" "fl" "Florida" "ga" "Georgia" "hi" "Hawaii" "ia" "Iowa" "id" "Idaho" "il" "Illinois" "in" "Indiana" "ks" "Kansas" "ky" "Kentucky" "la" "Louisiana" "ma" "Massachusetts" "md" "Maryland" "me" "Maine" "mi" "Michigan" "mn" "Minnesota" "mo" "Missouri" "ms" "Mississippi" "mt" "Montana" "nc" "North Carolina" "nd" "North Dakota" "ne" "Nebraska" "nh" "New Hampshire" "nj" "New Jersey" "nm" "New Mexico" "nv" "Nevada" "ny" "New York" "oh" "Ohio" "ok" "Oklahoma" "or" "Oregon" "pa" "Pennsylvania" "ri" "Rhode Island" "sc" "South Carolina" "sd" "South Dakota" "tn" "Tennessee" "tx" "Texas" "ut" "Utah" "va" "Virginia" "vt" "Vermont" "wa" "Washington" "wi" "Wisconsin" "wv" "West Virginia" "wy" "Wyoming" -}}
+
+{{/* ── Canada Provinces & Territories: ordered key list and full names ── */}}
+{{- $canadaKeys := slice "ab" "bc" "mb" "nb" "nl" "ns" "nt" "nu" "on" "pe" "qc" "sk" "yt" -}}
+{{- $canadaNames := dict "ab" "Alberta" "bc" "British Columbia" "mb" "Manitoba" "nb" "New Brunswick" "nl" "Newfoundland & Labrador" "ns" "Nova Scotia" "nt" "Northwest Territories" "nu" "Nunavut" "on" "Ontario" "pe" "Prince Edward Island" "qc" "Quebec" "sk" "Saskatchewan" "yt" "Yukon" -}}
+
+{{/* ── Australia States & Territories: ordered key list and full names ── */}}
+{{- $australiaKeys := slice "act" "nsw" "nt" "qld" "sa" "tas" "vic" "wa" -}}
+{{- $australiaNames := dict "act" "Australian Capital Territory" "nsw" "New South Wales" "nt" "Northern Territory" "qld" "Queensland" "sa" "South Australia" "tas" "Tasmania" "vic" "Victoria" "wa" "Western Australia" -}}
+
+{{/* ── Europe Countries: ordered key list and full names ── */}}
+{{- $europeKeys := slice "ad" "al" "at" "ba" "be" "bg" "by" "ch" "cz" "de" "dk" "ee" "es" "fi" "fo" "fr" "gb" "gg" "gr" "hr" "hu" "ie" "im" "is" "it" "je" "li" "lt" "lu" "lv" "mc" "md" "me" "mk" "mt" "nl" "no" "pl" "pt" "ro" "rs" "se" "si" "sk" "sm" "ua" "va" "xk" -}}
+{{- $europeNames := dict "ad" "Andorra" "al" "Albania" "at" "Austria" "ba" "Bosnia & Herzegovina" "be" "Belgium" "bg" "Bulgaria" "by" "Belarus" "ch" "Switzerland" "cz" "Czech Republic" "de" "Germany" "dk" "Denmark" "ee" "Estonia" "es" "Spain" "fi" "Finland" "fo" "Faroe Islands" "fr" "France" "gb" "United Kingdom" "gg" "Guernsey" "gr" "Greece" "hr" "Croatia" "hu" "Hungary" "ie" "Ireland" "im" "Isle of Man" "is" "Iceland" "it" "Italy" "je" "Jersey" "li" "Liechtenstein" "lt" "Lithuania" "lu" "Luxembourg" "lv" "Latvia" "mc" "Monaco" "md" "Moldova" "me" "Montenegro" "mk" "North Macedonia" "mt" "Malta" "nl" "Netherlands" "no" "Norway" "pl" "Poland" "pt" "Portugal" "ro" "Romania" "rs" "Serbia" "se" "Sweden" "si" "Slovenia" "sk" "Slovakia" "sm" "San Marino" "ua" "Ukraine" "va" "Vatican City" "xk" "Kosovo" -}}
+{{/* ── European Union (26 members present in SVG; cy/Cyprus not in europe SVG) ── */}}
+{{- $europeEuKeys := slice "at" "be" "bg" "cz" "de" "dk" "ee" "es" "fi" "fr" "gr" "hr" "hu" "ie" "it" "lt" "lu" "lv" "mt" "nl" "pl" "pt" "ro" "se" "si" "sk" -}}
+{{- $europeEuNames := dict "at" "Austria" "be" "Belgium" "bg" "Bulgaria" "cz" "Czech Republic" "de" "Germany" "dk" "Denmark" "ee" "Estonia" "es" "Spain" "fi" "Finland" "fr" "France" "gr" "Greece" "hr" "Croatia" "hu" "Hungary" "ie" "Ireland" "it" "Italy" "lt" "Lithuania" "lu" "Luxembourg" "lv" "Latvia" "mt" "Malta" "nl" "Netherlands" "pl" "Poland" "pt" "Portugal" "ro" "Romania" "se" "Sweden" "si" "Slovenia" "sk" "Slovakia" -}}
+{{/* Non-EU countries in europe SVG — rendered transparent */}}
+{{- $europeEuTransparent := slice "ad" "al" "ba" "by" "ch" "fo" "gb" "gg" "im" "is" "je" "li" "mc" "md" "me" "mk" "no" "rs" "sm" "ua" "va" "xk" -}}
+{{/* ── Schengen Area (29 members: 25 EU + ch, is, li, no; ie opted out) ── */}}
+{{- $europeSchengenKeys := slice "at" "be" "bg" "ch" "cz" "de" "dk" "ee" "es" "fi" "fr" "gr" "hr" "hu" "is" "it" "li" "lt" "lu" "lv" "mt" "nl" "no" "pl" "pt" "ro" "se" "si" "sk" -}}
+{{- $europeSchengenNames := dict "at" "Austria" "be" "Belgium" "bg" "Bulgaria" "ch" "Switzerland" "cz" "Czech Republic" "de" "Germany" "dk" "Denmark" "ee" "Estonia" "es" "Spain" "fi" "Finland" "fr" "France" "gr" "Greece" "hr" "Croatia" "hu" "Hungary" "is" "Iceland" "it" "Italy" "li" "Liechtenstein" "lt" "Lithuania" "lu" "Luxembourg" "lv" "Latvia" "mt" "Malta" "nl" "Netherlands" "no" "Norway" "pl" "Poland" "pt" "Portugal" "ro" "Romania" "se" "Sweden" "si" "Slovenia" "sk" "Slovakia" -}}
+{{/* Non-Schengen countries in europe SVG — rendered transparent */}}
+{{- $europeSchengenTransparent := slice "ad" "al" "ba" "by" "fo" "gb" "gg" "ie" "im" "je" "mc" "md" "me" "mk" "rs" "sm" "ua" "va" "xk" -}}
+{{/* ── US States + Territories: ordered key list and full names ── */}}
+{{- $usTerritoriesKeys := slice "ak" "al" "ar" "az" "ca" "co" "ct" "dc" "de" "fl" "ga" "hi" "ia" "id" "il" "in" "ks" "ky" "la" "ma" "md" "me" "mi" "mn" "mo" "ms" "mt" "nc" "nd" "ne" "nh" "nj" "nm" "nv" "ny" "oh" "ok" "or" "pa" "ri" "sc" "sd" "tn" "tx" "ut" "va" "vt" "wa" "wi" "wv" "wy" "as" "gu" "mp" "pr" "vi" -}}
+{{- $usTerritoriesNames := dict "ak" "Alaska" "al" "Alabama" "ar" "Arkansas" "az" "Arizona" "ca" "California" "co" "Colorado" "ct" "Connecticut" "dc" "District of Columbia" "de" "Delaware" "fl" "Florida" "ga" "Georgia" "hi" "Hawaii" "ia" "Iowa" "id" "Idaho" "il" "Illinois" "in" "Indiana" "ks" "Kansas" "ky" "Kentucky" "la" "Louisiana" "ma" "Massachusetts" "md" "Maryland" "me" "Maine" "mi" "Michigan" "mn" "Minnesota" "mo" "Missouri" "ms" "Mississippi" "mt" "Montana" "nc" "North Carolina" "nd" "North Dakota" "ne" "Nebraska" "nh" "New Hampshire" "nj" "New Jersey" "nm" "New Mexico" "nv" "Nevada" "ny" "New York" "oh" "Ohio" "ok" "Oklahoma" "or" "Oregon" "pa" "Pennsylvania" "ri" "Rhode Island" "sc" "South Carolina" "sd" "South Dakota" "tn" "Tennessee" "tx" "Texas" "ut" "Utah" "va" "Virginia" "vt" "Vermont" "wa" "Washington" "wi" "Wisconsin" "wv" "West Virginia" "wy" "Wyoming" "as" "American Samoa" "gu" "Guam" "mp" "N. Mariana Islands" "pr" "Puerto Rico" "vi" "U.S. Virgin Islands" -}}
+
+{{/* ── South America Countries (Natural Earth) ── */}}
+{{- $southAmericaKeys := slice "ar" "bo" "br" "cl" "co" "ec" "gy" "pe" "py" "sr" "uy" "ve" -}}
+{{- $southAmericaNames := dict "ar" "Argentina" "bo" "Bolivia" "br" "Brazil" "cl" "Chile" "co" "Colombia" "ec" "Ecuador" "gy" "Guyana" "pe" "Peru" "py" "Paraguay" "sr" "Suriname" "uy" "Uruguay" "ve" "Venezuela" -}}
+{{/* ── Africa Countries ── */}}
+{{- $africaKeys := slice "ao" "bf" "bi" "bj" "bw" "cd" "cf" "cg" "ci" "cm" "cv" "dj" "dz" "eg" "eh" "er" "et" "ga" "gh" "gm" "gn" "gq" "gw" "ke" "km" "lr" "ls" "ly" "ma" "mg" "ml" "mr" "mw" "mz" "na" "ne" "ng" "rw" "sd" "sl" "sn" "so" "ss" "st" "sz" "td" "tg" "tn" "tz" "ug" "za" "zm" "zw" -}}
+{{- $africaNames := dict "ao" "Angola" "bf" "Burkina Faso" "bi" "Burundi" "bj" "Benin" "bw" "Botswana" "cd" "DR Congo" "cf" "Central African Republic" "cg" "Republic of Congo" "ci" "Côte d'Ivoire" "cm" "Cameroon" "cv" "Cape Verde" "dj" "Djibouti" "dz" "Algeria" "eg" "Egypt" "eh" "Western Sahara" "er" "Eritrea" "et" "Ethiopia" "ga" "Gabon" "gh" "Ghana" "gm" "Gambia" "gn" "Guinea" "gq" "Equatorial Guinea" "gw" "Guinea-Bissau" "ke" "Kenya" "km" "Comoros" "lr" "Liberia" "ls" "Lesotho" "ly" "Libya" "ma" "Morocco" "mg" "Madagascar" "ml" "Mali" "mr" "Mauritania" "mw" "Malawi" "mz" "Mozambique" "na" "Namibia" "ne" "Niger" "ng" "Nigeria" "rw" "Rwanda" "sd" "Sudan" "sl" "Sierra Leone" "sn" "Senegal" "so" "Somalia" "ss" "South Sudan" "st" "São Tomé & Príncipe" "sz" "Eswatini" "td" "Chad" "tg" "Togo" "tn" "Tunisia" "tz" "Tanzania" "ug" "Uganda" "za" "South Africa" "zm" "Zambia" "zw" "Zimbabwe" -}}
+{{/* ── Asia Countries ── */}}
+{{- $asiaKeys := slice "ae" "af" "am" "az" "bd" "bh" "bn" "bt" "cn" "cy" "ge" "hk" "id" "il" "in" "iq" "ir" "jo" "jp" "kg" "kh" "kp" "kr" "kw" "kz" "la" "lb" "lk" "mm" "mn" "mo" "my" "np" "om" "ph" "pk" "ps" "qa" "sa" "sg" "sy" "tj" "tl" "tm" "tr" "tw" "uz" "vn" "ye" -}}
+{{- $asiaNames := dict "ae" "UAE" "af" "Afghanistan" "am" "Armenia" "az" "Azerbaijan" "bd" "Bangladesh" "bh" "Bahrain" "bn" "Brunei" "bt" "Bhutan" "cn" "China" "cy" "Cyprus" "ge" "Georgia" "hk" "Hong Kong" "id" "Indonesia" "il" "Israel" "in" "India" "iq" "Iraq" "ir" "Iran" "jo" "Jordan" "jp" "Japan" "kg" "Kyrgyzstan" "kh" "Cambodia" "kp" "North Korea" "kr" "South Korea" "kw" "Kuwait" "kz" "Kazakhstan" "la" "Laos" "lb" "Lebanon" "lk" "Sri Lanka" "mm" "Myanmar" "mn" "Mongolia" "mo" "Macao" "my" "Malaysia" "np" "Nepal" "om" "Oman" "ph" "Philippines" "pk" "Pakistan" "ps" "Palestine" "qa" "Qatar" "sa" "Saudi Arabia" "sg" "Singapore" "sy" "Syria" "tj" "Tajikistan" "tl" "Timor-Leste" "tm" "Turkmenistan" "tr" "Turkey" "tw" "Taiwan" "uz" "Uzbekistan" "vn" "Vietnam" "ye" "Yemen" -}}
+{{/* ── Oceania Countries ── */}}
+{{- $oceaniaKeys := slice "au" "fj" "fm" "ki" "mh" "nr" "nz" "pg" "pw" "sb" "to" "tv" "vu" "ws" -}}
+{{- $oceaniaNames := dict "au" "Australia" "fj" "Fiji" "fm" "Micronesia" "ki" "Kiribati" "mh" "Marshall Islands" "nr" "Nauru" "nz" "New Zealand" "pg" "Papua New Guinea" "pw" "Palau" "sb" "Solomon Islands" "to" "Tonga" "tv" "Tuvalu" "vu" "Vanuatu" "ws" "Samoa" -}}
+{{/* ── Europe Detail (Wikimedia — higher detail, includes gi/Gibraltar, no gb) ── */}}
+{{- $europeDetailKeys := slice "ad" "al" "at" "ba" "be" "bg" "by" "ch" "cz" "de" "dk" "ee" "es" "fi" "fo" "fr" "gg" "gi" "gr" "hr" "hu" "ie" "im" "is" "it" "je" "li" "lt" "lu" "lv" "mc" "md" "me" "mk" "mt" "nl" "no" "pl" "pt" "ro" "rs" "se" "si" "sk" "sm" "ua" "va" "xk" -}}
+{{- $europeDetailNames := dict "ad" "Andorra" "al" "Albania" "at" "Austria" "ba" "Bosnia & Herzegovina" "be" "Belgium" "bg" "Bulgaria" "by" "Belarus" "ch" "Switzerland" "cz" "Czech Republic" "de" "Germany" "dk" "Denmark" "ee" "Estonia" "es" "Spain" "fi" "Finland" "fo" "Faroe Islands" "fr" "France" "gg" "Guernsey" "gi" "Gibraltar" "gr" "Greece" "hr" "Croatia" "hu" "Hungary" "ie" "Ireland" "im" "Isle of Man" "is" "Iceland" "it" "Italy" "je" "Jersey" "li" "Liechtenstein" "lt" "Lithuania" "lu" "Luxembourg" "lv" "Latvia" "mc" "Monaco" "md" "Moldova" "me" "Montenegro" "mk" "North Macedonia" "mt" "Malta" "nl" "Netherlands" "no" "Norway" "pl" "Poland" "pt" "Portugal" "ro" "Romania" "rs" "Serbia" "se" "Sweden" "si" "Slovenia" "sk" "Slovakia" "sm" "San Marino" "ua" "Ukraine" "va" "Vatican City" "xk" "Kosovo" -}}
+{{/* ── France Regions (13 metropolitan regions, 2016–present) ── */}}
+{{- $franceRegionsKeys := slice "ara" "bfc" "bre" "cor" "cvl" "ges" "hdf" "idf" "naq" "nor" "occ" "pac" "pdl" -}}
+{{- $franceRegionsNames := dict "ara" "Auvergne-Rhône-Alpes" "bfc" "Bourgogne-Franche-Comté" "bre" "Bretagne" "cor" "Corse" "cvl" "Centre-Val de Loire" "ges" "Grand Est" "hdf" "Hauts-de-France" "idf" "Île-de-France" "naq" "Nouvelle-Aquitaine" "nor" "Normandie" "occ" "Occitanie" "pac" "Provence-Alpes-Côte d'Azur" "pdl" "Pays de la Loire" -}}
+{{- $worldKeys := slice "af" "an" "as" "eu" "na" "oc" "sa" -}}
+{{- $worldNames := dict "af" "Africa" "an" "Antarctica" "as" "Asia" "eu" "Europe" "na" "North America" "oc" "Oceania" "sa" "South America" -}}
+
+{{/* ── North America Countries ── */}}
+{{- $northAmericaKeys := slice "ag" "bb" "bs" "bz" "ca" "cr" "cu" "dm" "do" "gd" "gt" "hn" "ht" "jm" "kn" "lc" "mx" "ni" "pa" "sv" "tt" "us" "vc" -}}
+{{- $northAmericaNames := dict "ag" "Antigua & Barbuda" "bb" "Barbados" "bs" "Bahamas" "bz" "Belize" "ca" "Canada" "cr" "Costa Rica" "cu" "Cuba" "dm" "Dominica" "do" "Dominican Republic" "gd" "Grenada" "gt" "Guatemala" "hn" "Honduras" "ht" "Haiti" "jm" "Jamaica" "kn" "St. Kitts & Nevis" "lc" "St. Lucia" "mx" "Mexico" "ni" "Nicaragua" "pa" "Panama" "sv" "El Salvador" "tt" "Trinidad & Tobago" "us" "United States" "vc" "St. Vincent & Grenadines" -}}
+{{/* ── Central America Countries ── */}}
+{{- $centralAmericaKeys := slice "bz" "cr" "gt" "hn" "ni" "pa" "sv" -}}
+{{- $centralAmericaNames := dict "bz" "Belize" "cr" "Costa Rica" "gt" "Guatemala" "hn" "Honduras" "ni" "Nicaragua" "pa" "Panama" "sv" "El Salvador" -}}
+{{/* ── Caribbean Sovereign Nations ── */}}
+{{- $caribbeanKeys := slice "ag" "bb" "bs" "cu" "dm" "do" "gd" "ht" "jm" "kn" "lc" "tt" "vc" -}}
+{{- $caribbeanNames := dict "ag" "Antigua & Barbuda" "bb" "Barbados" "bs" "Bahamas" "cu" "Cuba" "dm" "Dominica" "do" "Dominican Republic" "gd" "Grenada" "ht" "Haiti" "jm" "Jamaica" "kn" "St. Kitts & Nevis" "lc" "St. Lucia" "tt" "Trinidad & Tobago" "vc" "St. Vincent & Grenadines" -}}
+{{/* ── Caribbean All (sovereigns + territories) ── */}}
+{{- $caribbeanAllKeys := slice "ag" "ai" "aw" "bb" "bl" "bs" "cu" "cw" "dm" "do" "gd" "ht" "jm" "kn" "lc" "mf" "ms" "pr" "sx" "tc" "tt" "vc" "vg" "vi" -}}
+{{- $caribbeanAllNames := dict "ag" "Antigua & Barbuda" "ai" "Anguilla" "aw" "Aruba" "bb" "Barbados" "bl" "St. Barthélemy" "bs" "Bahamas" "cu" "Cuba" "cw" "Curaçao" "dm" "Dominica" "do" "Dominican Republic" "gd" "Grenada" "ht" "Haiti" "jm" "Jamaica" "kn" "St. Kitts & Nevis" "lc" "St. Lucia" "mf" "Saint Martin" "ms" "Montserrat" "pr" "Puerto Rico" "sx" "Sint Maarten" "tc" "Turks & Caicos" "tt" "Trinidad & Tobago" "vc" "St. Vincent & Grenadines" "vg" "British Virgin Islands" "vi" "U.S. Virgin Islands" -}}
+{{/* ── Caribbean Territories only (non-sovereign; reuses caribbeanAll SVG) ── */}}
+{{- $caribbeanTerritoriesKeys := slice "ai" "aw" "bl" "cw" "mf" "ms" "pr" "sx" "tc" "vg" "vi" -}}
+{{- $caribbeanTerritoriesNames := dict "ai" "Anguilla" "aw" "Aruba" "bl" "St. Barthélemy" "cw" "Curaçao" "mf" "Saint Martin" "ms" "Montserrat" "pr" "Puerto Rico" "sx" "Sint Maarten" "tc" "Turks & Caicos" "vg" "British Virgin Islands" "vi" "U.S. Virgin Islands" -}}
+{{/* Sovereign nations transparent on caribbean-territories map */}}
+{{- $caribbeanTerritoriesTransparent := slice "ag" "bb" "bs" "cu" "dm" "do" "gd" "ht" "jm" "kn" "lc" "tt" "vc" -}}
+
+{{/* ── Determine grid keys / labels by map type ── */}}
+{{- $gridKeys    := $usKeys -}}
+{{- $labelLookup := $usNames -}}
+{{- if eq $mapName "canada" -}}
+  {{- $gridKeys    = $canadaKeys -}}
+  {{- $labelLookup = $canadaNames -}}
+{{- else if eq $mapName "canada-detailed" -}}
+  {{- $gridKeys    = $canadaKeys -}}
+  {{- $labelLookup = $canadaNames -}}
+{{- else if eq $mapName "australia-states" -}}
+  {{- $gridKeys    = $australiaKeys -}}
+  {{- $labelLookup = $australiaNames -}}
+{{- else if eq $mapName "europe" -}}
+  {{- $gridKeys    = $europeKeys -}}
+  {{- $labelLookup = $europeNames -}}
+{{- else if eq $mapName "europe-eu" -}}
+  {{- $gridKeys    = $europeEuKeys -}}
+  {{- $labelLookup = $europeEuNames -}}
+{{- else if eq $mapName "europe-schengen" -}}
+  {{- $gridKeys    = $europeSchengenKeys -}}
+  {{- $labelLookup = $europeSchengenNames -}}
+{{- else if eq $mapName "us-territories" -}}
+  {{- $gridKeys    = $usTerritoriesKeys -}}
+  {{- $labelLookup = $usTerritoriesNames -}}
+{{- else if eq $mapName "south-america" -}}
+  {{- $gridKeys    = $southAmericaKeys -}}
+  {{- $labelLookup = $southAmericaNames -}}
+{{- else if eq $mapName "north-america" -}}
+  {{- $gridKeys    = $northAmericaKeys -}}
+  {{- $labelLookup = $northAmericaNames -}}
+{{- else if eq $mapName "central-america" -}}
+  {{- $gridKeys    = $centralAmericaKeys -}}
+  {{- $labelLookup = $centralAmericaNames -}}
+{{- else if eq $mapName "caribbean" -}}
+  {{- $gridKeys    = $caribbeanKeys -}}
+  {{- $labelLookup = $caribbeanNames -}}
+{{- else if eq $mapName "caribbean-all" -}}
+  {{- $gridKeys    = $caribbeanAllKeys -}}
+  {{- $labelLookup = $caribbeanAllNames -}}
+{{- else if eq $mapName "caribbean-territories" -}}
+  {{- $gridKeys    = $caribbeanTerritoriesKeys -}}
+  {{- $labelLookup = $caribbeanTerritoriesNames -}}
+{{- else if eq $mapName "europe-detail" -}}
+  {{- $gridKeys    = $europeDetailKeys -}}
+  {{- $labelLookup = $europeDetailNames -}}
+{{- else if eq $mapName "africa" -}}
+  {{- $gridKeys    = $africaKeys -}}
+  {{- $labelLookup = $africaNames -}}
+{{- else if eq $mapName "asia" -}}
+  {{- $gridKeys    = $asiaKeys -}}
+  {{- $labelLookup = $asiaNames -}}
+{{- else if eq $mapName "oceania" -}}
+  {{- $gridKeys    = $oceaniaKeys -}}
+  {{- $labelLookup = $oceaniaNames -}}
+{{- else if eq $mapName "france-regions" -}}
+  {{- $gridKeys    = $franceRegionsKeys -}}
+  {{- $labelLookup = $franceRegionsNames -}}
+{{- else if eq $mapName "world" -}}
+  {{- $gridKeys    = $worldKeys -}}
+  {{- $labelLookup = $worldNames -}}
+{{- else if ne $mapName "us-states" -}}
+  {{- $gridKeys    = slice -}}
+  {{- $labelLookup = dict -}}
+  {{- if $mapData -}}
+    {{- range $mapData -}}
+      {{- $gridKeys    = $gridKeys | append .key -}}
+      {{- $labelLookup = merge $labelLookup (dict (printf "%v" .key) (.label | default .key)) -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+
+{{/* ── Stats — computed here so they're available in the template ── */}}
+{{- $totalCount   := len $gridKeys -}}
+{{- $visitedCount := 0 -}}
+{{- range $gridKeys -}}
+  {{- if index $regionMap . -}}{{- $visitedCount = add $visitedCount 1 -}}{{- end -}}
+{{- end -}}
+{{- $pct          := 0 -}}
+{{- if gt $totalCount 0 -}}
+  {{- $pct = int (math.Round (mul (div (float $visitedCount) (float $totalCount)) 100)) -}}
+{{- end -}}
+
+{{/* ════════════════════════════════════════════════
+     CSS — emitted once per page
+     ════════════════════════════════════════════════ */}}
+{{- if not (.Page.Scratch.Get "colormapCSS") -}}
+{{- .Page.Scratch.Set "colormapCSS" true -}}
+<style>
+.colormap-wrapper{position:relative;z-index:0;width:100%;font-family:inherit;margin:1.5em 0;}
+.colormap-visual{width:100%;}
+.colormap-visual svg{display:block;width:100%;height:auto;}
+.colormap-visual svg .state{fill:#dde1e6;}
+.colormap-visual svg .borders path,.colormap-visual svg .borders polyline{fill:none;}
+.colormap-visual svg .separator1{fill:none;stroke:#b0b0b0;stroke-width:2;}
+
+.colormap-wrapper .colormap-grid{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:12px;}
+.colormap-wrapper .colormap-tile{width:44px;height:44px;border-radius:5px;font-size:16px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;display:flex;align-items:center;justify-content:center;padding:0;margin:0;border:none;user-select:none;box-sizing:border-box;line-height:1;appearance:none;-webkit-appearance:none;vertical-align:top;}
+.colormap-wrapper .colormap-tile--visited{background-color:var(--tile-color,#4a7c59);color:#fff !important;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.22);transition:transform .12s ease,box-shadow .12s ease,opacity .12s ease;}
+.colormap-wrapper .colormap-tile--visited:hover,.colormap-wrapper .colormap-tile--visited:focus-visible{color:#fff !important;transform:translateY(-2px);box-shadow:0 4px 10px rgba(0,0,0,.22);opacity:.88;outline:none;}
+.colormap-wrapper .colormap-tile--visited:active{transform:translateY(0);box-shadow:0 1px 2px rgba(0,0,0,.18);}
+.colormap-wrapper .colormap-tile--unvisited{background-color:#ebebeb;color:#b0b0b0;cursor:default;}
+.colormap-wrapper .colormap-tile--legend{width:auto;padding:0 14px;text-transform:none;font-size:14px;letter-spacing:.01em;cursor:pointer;background-color:var(--tile-color,#4a7c59);color:#fff !important;box-shadow:0 1px 3px rgba(0,0,0,.22);transition:transform .12s ease,box-shadow .12s ease,opacity .12s ease;}
+.colormap-wrapper .colormap-tile--name{width:auto;padding:0 14px;text-transform:none;font-size:14px;letter-spacing:.01em;}
+.colormap-wrapper .colormap-tile--legend:hover,.colormap-wrapper .colormap-tile--legend:focus-visible{color:#fff !important;transform:translateY(-2px);box-shadow:0 4px 10px rgba(0,0,0,.22);opacity:.88;outline:none;}
+.colormap-wrapper .colormap-tile--legend:active{transform:translateY(0);box-shadow:0 1px 2px rgba(0,0,0,.18);}
+.colormap-wrapper .colormap-tile-sep{width:10px;height:44px;flex-shrink:0;}
+.colormap-wrapper .colormap-tile--stat{width:auto;padding:0 14px;text-transform:none;font-size:14px;font-weight:700;letter-spacing:.02em;cursor:pointer;background-color:var(--tile-color,#4a7c59);color:#fff !important;box-shadow:0 1px 3px rgba(0,0,0,.22);transition:transform .12s ease,box-shadow .12s ease,opacity .12s ease;}
+.colormap-wrapper .colormap-tile--stat:hover,.colormap-wrapper .colormap-tile--stat:focus-visible{color:#fff !important;transform:translateY(-2px);box-shadow:0 4px 10px rgba(0,0,0,.22);opacity:.88;outline:none;}
+.colormap-wrapper .colormap-tile--stat:active{transform:translateY(0);box-shadow:0 1px 2px rgba(0,0,0,.18);}
+.colormap-popup__list{margin:0 0 14px;padding:0;list-style:none;display:flex;flex-wrap:wrap;align-items:center;gap:3px 10px;max-height:220px;overflow-y:auto;font-size:13px;color:#444;}
+.colormap-popup__divider{display:block;height:0;border:none;border-top:1px solid #eee;margin:10px 0 12px;}
+.colormap-popup__pill{display:inline-flex;align-items:center;justify-content:center;height:20px;padding:0 9px;border-radius:20px;font-family:system-ui,sans-serif;font-size:13px;font-weight:700;line-height:1;color:#fff;background:#555;letter-spacing:.04em;flex-shrink:0;}
+.colormap-popup{position:fixed;inset:0;background:rgba(0,0,0,.48);display:flex;align-items:center;justify-content:center;z-index:99999;padding:16px;box-sizing:border-box;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);animation:colormap-fadein .15s ease;}
+.colormap-popup[hidden]{display:none;}
+@keyframes colormap-fadein{from{opacity:0}to{opacity:1}}
+.colormap-popup__card{background:#fff;border-radius:10px;padding:28px 28px 24px;max-width:380px;width:100%;max-height:85vh;overflow-y:auto;position:relative;box-shadow:0 12px 40px rgba(0,0,0,.2);animation:colormap-slideup .18s ease;}
+@keyframes colormap-slideup{from{transform:translateY(10px);opacity:.5}to{transform:translateY(0);opacity:1}}
+.colormap-popup__close{position:absolute;top:12px;right:14px;background:none;border:none;font-size:22px;line-height:1;color:#888;cursor:pointer;padding:4px 6px;border-radius:4px;transition:background .1s,color .1s;}
+.colormap-popup__close:hover,.colormap-popup__close:focus-visible{background:#f0f0f0;color:#333;outline:none;}
+.colormap-popup__key{margin:0 0 2px;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#999;}
+.colormap-popup__title{margin:0 0 10px;font-size:20px;font-weight:700;color:#111;line-height:1.2;}
+.colormap-popup__note{margin:0 0 14px;color:#444;line-height:1.6;font-size:15px;}
+.colormap-popup__note:empty{display:none;}
+.colormap-popup__link{display:inline-block;font-size:14px;font-weight:600;color:#2563eb;text-decoration:none;border-bottom:1px solid transparent;transition:border-color .1s;}
+.colormap-popup__link:hover{border-bottom-color:currentColor;}
+.colormap-popup__link[hidden]{display:none;}
+@media(max-width:480px){.colormap-wrapper .colormap-tile{width:38px;height:38px;font-size:15px;}.colormap-wrapper .colormap-tile--legend,.colormap-wrapper .colormap-tile--stat,.colormap-wrapper .colormap-tile--name{width:auto;}.colormap-wrapper .colormap-grid{gap:4px;}}
+.colormap-caption{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;}
+@media(prefers-color-scheme:dark){
+  .colormap-wrapper .colormap-tile--unvisited{background-color:#2a2a2a;color:#555;}
+  .colormap-popup{background:rgba(0,0,0,.65);}
+  .colormap-popup__card{background:#1e1e1e;box-shadow:0 12px 40px rgba(0,0,0,.5);}
+  .colormap-popup__key{color:#666;}
+  .colormap-popup__title{color:#f0f0f0;}
+  .colormap-popup__note{color:#bbb;}
+  .colormap-popup__list{color:#bbb;}
+  .colormap-popup__divider{border-top-color:#333;}
+  .colormap-popup__close{color:#666;}
+  .colormap-popup__close:hover,.colormap-popup__close:focus-visible{background:#2a2a2a;color:#ccc;}
+  .colormap-popup__link{color:#60a5fa;}
+  .colormap-caption{color:#666;}
+}
+</style>
+{{- end -}}
+
+{{/* ════════════════════════════════════════════════
+     Shared JS — emitted once per page
+     ════════════════════════════════════════════════ */}}
+{{- if not (.Page.Scratch.Get "colormapJS") -}}
+{{- .Page.Scratch.Set "colormapJS" true -}}
+<script>
+(function(){
+  "use strict";
+  function initColormap(wrapper){
+    var popup=wrapper.querySelector(".colormap-popup");
+    if(!popup)return;
+    var card=wrapper.querySelector(".colormap-popup__card");
+    var closeBtn=wrapper.querySelector(".colormap-popup__close");
+    var elKey=wrapper.querySelector(".colormap-popup__key");
+    var elTitle=wrapper.querySelector(".colormap-popup__title");
+    var elNote=wrapper.querySelector(".colormap-popup__note");
+    var elLink=wrapper.querySelector(".colormap-popup__link");
+    var elList=wrapper.querySelector(".colormap-popup__list");
+    var prev=null;
+    function open(tile){
+      var key=tile.dataset.key||"";
+      elKey.textContent=key.toUpperCase();
+      elKey.style.display=key?"":"none";
+      elTitle.textContent=tile.dataset.label||key.toUpperCase();
+      elNote.textContent=tile.dataset.note||"";
+      if(tile.dataset.url){elLink.href=tile.dataset.url;elLink.removeAttribute("hidden");}
+      else{elLink.setAttribute("hidden","");}
+      elList.innerHTML="";
+      if(tile.dataset.keys){
+        var names=JSON.parse(tile.dataset.keys);
+        var hr=document.createElement("div");
+        hr.className="colormap-popup__divider";
+        card.insertBefore(hr,elList);
+        var pill=document.createElement("li");
+        pill.className="colormap-popup__pill";
+        pill.textContent=names.length;
+        elList.appendChild(pill);
+        names.forEach(function(n){var li=document.createElement("li");li.textContent=n;elList.appendChild(li);});
+        elList.removeAttribute("hidden");
+      } else {
+        elList.setAttribute("hidden","");
+      }
+      prev=document.activeElement;
+      popup.hidden=false;
+      wrapper.style.zIndex='1';
+      closeBtn.focus();
+      document.body.style.overflow="hidden";
+    }
+    function close(){
+      popup.hidden=true;
+      wrapper.style.zIndex='';
+      document.body.style.overflow="";
+      elList.innerHTML="";
+      elList.setAttribute("hidden","");
+      var hr=card.querySelector(".colormap-popup__divider");
+      if(hr)hr.remove();
+      elKey.style.display="";
+      if(prev)prev.focus();
+    }
+    wrapper.querySelectorAll(".colormap-tile--visited,.colormap-tile--legend,.colormap-tile--stat").forEach(function(t){
+      t.addEventListener("click",function(){open(t);});
+    });
+    closeBtn.addEventListener("click",close);
+    popup.addEventListener("click",function(e){if(e.target===popup)close();});
+    popup.addEventListener("keydown",function(e){
+      if(e.key==="Escape"||e.key==="Esc"){close();return;}
+      if(e.key!=="Tab")return;
+      var f=popup.querySelectorAll("button,[href],[tabindex]:not([tabindex=\"-1\"])");
+      var first=f[0],last=f[f.length-1];
+      if(e.shiftKey){if(document.activeElement===first){e.preventDefault();last.focus();}}
+      else{if(document.activeElement===last){e.preventDefault();first.focus();}}
+    });
+  }
+  function boot(){
+    document.querySelectorAll(".colormap-wrapper").forEach(initColormap);
+  }
+  if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",boot);}
+  else{boot();}
+})();
+</script>
+{{- end -}}
+
+{{/* ════════════════════════════════════════════════
+     Per-instance markup
+     ════════════════════════════════════════════════ */}}
+<div class="colormap-wrapper" id="{{ $id }}">
+
+  {{/* Per-region color injection — scoped to this instance's SVG id */}}
+  <style>
+  {{- range $regionMap -}}
+    {{- $fill := .color | default $defaultColor -}}
+    #{{ $id }}-map .{{ .key }}{fill:{{ $fill }};}
+  {{- end -}}
+  {{- if $emptyColor }}
+    #{{ $id }}-map .state{fill:{{ $emptyColor }};}
+    #{{ $id }} .colormap-tile--unvisited{background-color:{{ $emptyColor }};}
+  {{- end -}}
+  {{- if or (eq $mapName "europe-eu") (eq $mapName "europe-schengen") -}}
+    {{- $transparentKeys := cond (eq $mapName "europe-eu") $europeEuTransparent $europeSchengenTransparent -}}
+    {{- range $transparentKeys }}
+    #{{ $id }}-map .{{ . }}{fill:transparent;}
+    {{- end -}}
+  {{- end -}}
+  {{- if eq $mapName "caribbean-territories" -}}
+    {{- range $caribbeanTerritoriesTransparent }}
+    #{{ $id }}-map .{{ . }}{fill:transparent;}
+    {{- end -}}
+  {{- end -}}
+  </style>
+
+  {{/* Visual map */}}
+  <div class="colormap-visual" aria-hidden="true">
+    {{/* Resolve SVG filename — most map names match their filename directly.
+         A few map variants share an SVG with another map. */}}
+    {{- $svgFile := $mapName -}}
+    {{- if eq $mapName "europe-eu"              -}}{{- $svgFile = "europe" -}}
+    {{- else if eq $mapName "europe-schengen"    -}}{{- $svgFile = "europe" -}}
+    {{- else if eq $mapName "caribbean-territories" -}}{{- $svgFile = "caribbean-all" -}}
+    {{- end -}}
+    {{- $svgRes := resources.Get (printf "colormaps/%s.svg" $svgFile) -}}
+    {{- if $svgRes -}}
+    {{- $svgRes.Content | replaceRE `<svg ` (printf `<svg id="%s-map" ` $id) | safeHTML -}}
+    {{- else -}}
+    <!-- colormap: map "{{ $mapName }}" not found — place SVG at assets/colormaps/{{ $svgFile }}.svg -->
+    {{- end -}}
+  
+  </div>
+
+  {{/* Interactive region grid — legend tiles first, then state tiles */}}
+  {{- if $showGrid -}}
+  <div class="colormap-grid" role="list" aria-label="Regions">
+    {{- if $legendData -}}
+      {{- range $legendData -}}
+        {{- $fill        := .color | default $defaultColor | lower -}}
+        {{- $legendNote  := .note | default "" -}}
+        {{- $legendUrl   := .url  | default "" -}}
+        {{/* Collect names of regions whose resolved color matches this legend entry */}}
+        {{- $matchedNames := slice -}}
+        {{- range $regionMap -}}
+          {{- $entryColor := .color | default $defaultColor | lower -}}
+          {{- if eq $entryColor $fill -}}
+            {{- $entryName := index $labelLookup (printf "%v" .key) | default (.key | upper) -}}
+            {{- $entryName  = .name | default $entryName -}}
+            {{- $matchedNames = $matchedNames | append $entryName -}}
+          {{- end -}}
+        {{- end -}}
+        {{- $matchedNames = sort $matchedNames -}}
+        <button class="colormap-tile colormap-tile--legend"
+          data-key=""
+          data-label="{{ .label }}"
+          data-note="{{ $legendNote }}"
+          data-url="{{ $legendUrl }}"
+          data-keys="{{ $matchedNames | jsonify }}"
+          data-color="{{ $fill }}"
+          style="--tile-color:{{ $fill }};"
+          aria-label="Legend: {{ .label }}"
+          role="listitem">{{ .label }}</button>
+      {{- end -}}
+      <div class="colormap-tile-sep" role="presentation" aria-hidden="true"></div>
+    {{- end -}}
+    {{- range $gridKeys -}}
+      {{- $key   := . -}}
+      {{- $label := index $labelLookup $key | default ($key | upper) -}}
+      {{- $entry := index $regionMap $key -}}
+      {{- if $entry -}}
+        {{- $fill := $entry.color | default $defaultColor -}}
+        {{- $label = $entry.name | default $label -}}
+        <button class="colormap-tile colormap-tile--visited{{ if $tilesName }} colormap-tile--name{{ end }}"
+          data-key="{{ $key }}"
+          data-label="{{ $label }}"
+          data-note="{{ $entry.note | default "" }}"
+          data-url="{{ $entry.url | default "" }}"
+          style="--tile-color:{{ $fill }};"
+          aria-label="View notes for {{ $label }}"
+          role="listitem">{{ if $tilesName }}{{ $label }}{{ else }}{{ $key | upper }}{{ end }}</button>
+      {{- else -}}
+        <div class="colormap-tile colormap-tile--unvisited{{ if $tilesName }} colormap-tile--name{{ end }}"
+          role="listitem"
+          aria-label="{{ $label }}">{{ if $tilesName }}{{ $label }}{{ else }}{{ $key | upper }}{{ end }}</div>
+      {{- end -}}
+    {{- end -}}
+    {{- if $showStats -}}
+      {{/* Collect all visited names sorted */}}
+      {{- $allNames := slice -}}
+      {{- range $regionMap -}}
+        {{- $entryName := index $labelLookup (printf "%v" .key) | default (.key | upper) -}}
+        {{- $entryName  = .name | default $entryName -}}
+        {{- $allNames = $allNames | append $entryName -}}
+      {{- end -}}
+      {{- $allNames = sort $allNames -}}
+      <div class="colormap-tile-sep" role="presentation" aria-hidden="true"></div>
+      <button class="colormap-tile colormap-tile--stat"
+        data-key=""
+        data-label="{{ $pct }}% Complete"
+        data-note=""
+        data-url=""
+        data-keys="{{ $allNames | jsonify }}"
+        style="--tile-color:{{ $defaultColor }};"
+        aria-label="{{ $visitedCount }} of {{ $totalCount }}, {{ $pct }}% Complete"
+        role="listitem">{{ $visitedCount }}&thinsp;/&thinsp;{{ $totalCount }}&ensp;&middot;&ensp;{{ $pct }}% Complete</button>
+    {{- end -}}
+  </div>
+
+  {{/* Popup */}}
+  <div class="colormap-popup" hidden
+    role="dialog" aria-modal="true"
+    aria-labelledby="{{ $id }}-popup-title">
+    <div class="colormap-popup__card">
+      <button class="colormap-popup__close" aria-label="Close">&#215;</button>
+      <p  class="colormap-popup__key"   id="{{ $id }}-popup-key"></p>
+      <h3 class="colormap-popup__title" id="{{ $id }}-popup-title"></h3>
+      <p  class="colormap-popup__note"></p>
+      <ul class="colormap-popup__list" hidden></ul>
+      <a  class="colormap-popup__link" href="#" target="_blank" rel="noopener noreferrer">Read more &rarr;</a>
+    </div>
+  </div>
+  {{- end -}}
+
+  {{/* noscript fallback — visible only when JS is disabled */}}
+  <noscript><div style="padding:12px 0;font-family:sans-serif;font-size:13px;color:#888;text-align:center;">This map requires JavaScript — tiles and popups are unavailable without it.</div></noscript>
+
+  {{/* RSS/reader caption — visually hidden in browser, visible in RSS where CSS is stripped */}}
+  <p class="colormap-caption">[Interactive map — visit the original post to explore it.]</p>
+
+</div>
