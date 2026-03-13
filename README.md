@@ -5,7 +5,7 @@
 
 ## Overview
 
-Colormap is a shortcode plugin for Micro.blog that lets you embed interactive, clickable maps directly into your posts and pages. Highlight the places you've visited, add personal notes and links, and display a visual tile grid — all with a simple tag in your post.
+Colormap is a shortcode plugin for Micro.blog that lets you embed interactive, colored maps directly into your posts and pages. Highlight the places you've visited, add personal notes and links, and display a visual tile grid — all with a simple tag in your post.
 
 Each map can show colored regions, a tile grid of visited places, clickable popups with notes and links, an optional legend, and a progress tracker. Multiple independent maps can appear on a single page.
 
